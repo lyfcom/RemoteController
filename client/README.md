@@ -15,6 +15,10 @@
 - 文件操作：列目/读/写/删（文件与目录）
 - 截图：`screenshots` 库捕获屏幕，PNG base64（支持显示器索引）
 - 远程重启：接收 `restart` 指令，重读资源并拉起自身新进程后退出
+- 文件传输：
+  - 接收 `upload_file { path, file_base64 }`，写入文件并通过 `upload_file_result` 回执
+  - 接收 `download_file { path }`，读取文件 base64 回传 `download_file_result`
+  - 与服务端/前端事件命名对齐
 
 ### 2. 运行路径与自迁移
 - 目标目录：`%APPDATA%/RemoteController`
@@ -31,12 +35,17 @@
 - `do_file_operation`：`{ operation, path, file_data }` 并回传 `file_operation_result`
 - `screenshot`：`{ display_index }` 截图并回传 `screenshot_result`
 - `restart`：拉起自身并退出（资源重载）
+- `reset_context`：重置共享 PowerShell/CMD 会话
+- `upload_file`：`{ path, file_base64 }` 将 base64 解码写入指定路径
+- `download_file`：`{ path }` 读取文件并回传 base64
 
 发送（Client → Server）：
 - `register_client`：`{ uuid }`（冗余，握手 auth 已带 UUID）
 - `command_output`：`{ uuid, command, output, error }`
 - `file_operation_result`：`{ uuid, operation, success, data, error }`
 - `screenshot_result`：`{ uuid, success, image_base64, error }`
+- `upload_file_result`：`{ uuid, success, path, error? }`
+- `download_file_result`：`{ uuid, success, path, file_base64?, error? }`
 
 ### 4. 命令执行实现
 - 共享上下文：
@@ -47,6 +56,9 @@
   - `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command <cmd>` 或 `cmd.exe /C <cmd>`
   - 直接捕获输出发送
 - 子进程创建统一加 `CREATE_NO_WINDOW`，防止窗口闪烁
+
+#### 重置共享上下文
+- 处理 `reset_context` 事件：丢弃并重建共享进程（PowerShell/CMD），用于清理污染的上下文环境。
 
 ### 5. 文件操作实现
 `list_dir`/`read_file`/`write_file`/`delete_file`/`delete_dir`，返回 JSON：
