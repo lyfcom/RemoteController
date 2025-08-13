@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, session, redirect, url_for
+from flask import Flask, render_template, request, session, redirect, url_for, send_from_directory
 from flask_socketio import SocketIO, emit, disconnect, join_room, leave_room
 import os
 from dotenv import load_dotenv
@@ -49,6 +49,10 @@ def _sanitize_output_text(text: str) -> str:
 # 全局变量存储连接的客户端信息
 connected_clients = {}  # {sid: {uuid: str, connect_time: datetime, ip: str}}
 client_uuid_mapping = {}  # {uuid: sid} 用于通过UUID快速查找sid
+
+# 服务器端下载保存目录（使用绝对路径，默认放在应用根目录下的 downloads/）
+_default_download = os.path.join(app.root_path, 'downloads')
+DOWNLOAD_DIR = os.path.abspath(os.getenv('DOWNLOAD_DIR', _default_download))
 
 # 简单的认证密码
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
@@ -204,6 +208,69 @@ def handle_file_operation_result(data):
         
     except Exception as e:
         logger.error(f'处理文件操作结果失败: {e}')
+
+@socketio.on('upload_file_result')
+def handle_upload_file_result(data):
+    """处理来自客户端的上传结果并转发给Web端"""
+    try:
+        client_uuid = data.get('uuid')
+        success = data.get('success', False)
+        path = data.get('path', '')
+        error = data.get('error', '')
+        socketio.emit('upload_file_response', {
+            'uuid': client_uuid,
+            'success': success,
+            'path': path,
+            'error': error,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, room='web_clients')
+    except Exception as e:
+        logger.error(f'处理上传结果失败: {e}')
+
+@socketio.on('download_file_result')
+def handle_download_file_result(data):
+    """处理来自客户端的下载结果并转发给Web端"""
+    try:
+        client_uuid = data.get('uuid')
+        success = data.get('success', False)
+        path = data.get('path', '')
+        file_base64 = data.get('file_base64', '')
+        error = data.get('error', '')
+        download_url = None
+        if success and file_base64:
+            try:
+                # 保存到服务器下载目录
+                os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+                base_name = os.path.basename(path) or 'downloaded.bin'
+                ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                safe_name = f"{ts}_{base_name}"
+                import base64
+                data_bytes = base64.b64decode(file_base64)
+                server_path = os.path.join(DOWNLOAD_DIR, safe_name)
+                with open(server_path, 'wb') as f:
+                    f.write(data_bytes)
+                download_url = url_for('download_saved_file', filename=safe_name)
+                logger.info(f"客户端下载保存: {server_path} -> {download_url}")
+            except Exception as save_e:
+                logger.error(f'保存下载文件失败: {save_e}')
+                error = f'保存下载文件失败: {save_e}'
+                success = False
+        socketio.emit('file_download_response', {
+            'uuid': client_uuid,
+            'success': success,
+            'path': path,
+            'file_base64': file_base64,
+            'download_url': download_url,
+            'error': error,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, room='web_clients')
+    except Exception as e:
+        logger.error(f'处理下载结果失败: {e}')
+        
+@app.route('/download/<path:filename>')
+def download_saved_file(filename):
+    """提供服务器已保存的下载文件"""
+    return send_from_directory(DOWNLOAD_DIR, filename, as_attachment=True)
 
 @socketio.on('screenshot_result')
 def handle_screenshot_result(data):
@@ -374,6 +441,50 @@ def handle_screenshot(data):
         logger.error(f'截图请求失败: {e}')
         emit('error', {'message': f'截图请求失败: {str(e)}'})
 
+@socketio.on('upload_file_to_client')
+def handle_upload_file_to_client(data):
+    """处理来自Web客户端的上传请求并转发到目标客户端"""
+    try:
+        target_uuid = data.get('target_uuid')
+        path = data.get('path')  # 目标文件完整路径（含文件名）
+        file_base64 = data.get('file_base64')
+        if not target_uuid or not path or not file_base64:
+            emit('error', {'message': '缺少目标UUID、路径或文件数据'})
+            return
+        target_sid = client_uuid_mapping.get(target_uuid)
+        if not target_sid:
+            emit('error', {'message': f'客户端 {target_uuid} 未连接'})
+            return
+        logger.info(f'转发上传到客户端 {target_uuid}: {path}')
+        socketio.emit('upload_file', {
+            'path': path,
+            'file_base64': file_base64,
+        }, room=target_sid)
+    except Exception as e:
+        logger.error(f'上传转发失败: {e}')
+        emit('error', {'message': f'上传转发失败: {str(e)}'})
+
+@socketio.on('download_file_from_client')
+def handle_download_file_from_client(data):
+    """处理来自Web客户端的下载请求并转发到目标客户端"""
+    try:
+        target_uuid = data.get('target_uuid')
+        path = data.get('path')
+        if not target_uuid or not path:
+            emit('error', {'message': '缺少目标UUID或路径'})
+            return
+        target_sid = client_uuid_mapping.get(target_uuid)
+        if not target_sid:
+            emit('error', {'message': f'客户端 {target_uuid} 未连接'})
+            return
+        logger.info(f'转发下载到客户端 {target_uuid}: {path}')
+        socketio.emit('download_file', {
+            'path': path,
+        }, room=target_sid)
+    except Exception as e:
+        logger.error(f'下载转发失败: {e}')
+        emit('error', {'message': f'下载转发失败: {str(e)}'})
+
 def emit_client_list_update():
     """向所有Web客户端发送客户端列表更新"""
     try:
@@ -393,6 +504,12 @@ if __name__ == '__main__':
     host = os.getenv('HOST', '0.0.0.0')
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('DEBUG', 'True').lower() == 'true'
+    
+    # 确保下载目录存在
+    try:
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    except Exception as e:
+        logger.error(f'创建下载目录失败: {e}')
     
     logger.info(f'启动服务器: {host}:{port} (Debug: {debug})')
     socketio.run(app, host=host, port=port, debug=debug)

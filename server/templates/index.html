@@ -394,6 +394,20 @@
                     <input type="text" class="file-path-input" id="deleteFilePath" placeholder="文件路径">
                     <button class="btn btn-small btn-danger" onclick="deleteFile()">删除文件</button>
                 </div>
+
+                <div class="file-op-group">
+                    <h4>⬆️ 上传文件到客户端</h4>
+                    <input type="text" class="file-path-input" id="uploadTargetPath" placeholder="客户端保存为 (含文件名)">
+                    <input type="file" class="file-path-input" id="uploadLocalFile">
+                    <button class="btn btn-small" onclick="uploadFileToClient()">上传</button>
+                </div>
+
+                <div class="file-op-group">
+                    <h4>⬇️ 从客户端下载文件</h4>
+                    <input type="text" class="file-path-input" id="downloadSourcePath" placeholder="客户端文件路径">
+                    <button class="btn btn-small" onclick="downloadFileFromClient()">下载</button>
+                    <div id="downloadLinkContainer" style="margin-top:6px; font-size:0.85rem; color:#333;"></div>
+                </div>
             </div>
         </main>
     </div>
@@ -627,6 +641,36 @@
                 path: path || '.'
             });
         }
+
+        async function uploadFileToClient() {
+            if (!selectedClient) { showNotification('请先选择一个客户端', 'error'); return; }
+            const path = document.getElementById('uploadTargetPath').value.trim();
+            const fileInput = document.getElementById('uploadLocalFile');
+            if (!path || !fileInput.files || fileInput.files.length === 0) {
+                showNotification('请选择本地文件并填写客户端保存路径', 'error');
+                return;
+            }
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.onload = function() {
+                const base64Data = reader.result.split(',')[1]; // data:*/*;base64,xxx
+                socket.emit('upload_file_to_client', {
+                    target_uuid: selectedClient,
+                    path: path,
+                    file_base64: base64Data
+                });
+                showNotification('正在上传...', 'info');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function downloadFileFromClient() {
+            if (!selectedClient) { showNotification('请先选择一个客户端', 'error'); return; }
+            const path = document.getElementById('downloadSourcePath').value.trim();
+            if (!path) { showNotification('请输入客户端文件路径', 'error'); return; }
+            socket.emit('download_file_from_client', { target_uuid: selectedClient, path });
+            showNotification('已请求下载', 'info');
+        }
         
         function readFile() {
             const path = document.getElementById('readFilePath').value.trim();
@@ -740,6 +784,42 @@
             socket.emit('reset_context', { target_uuid: selectedClient });
             showNotification('已请求重置共享上下文', 'info');
         }
+
+        // 上传文件响应
+        socket.on('upload_file_response', function(data) {
+            if (data.success) {
+                showNotification(`上传成功: ${data.path}`, 'success');
+                addTerminalLine(data.timestamp, data.uuid, `上传: ${data.path}`, '上传成功');
+            } else {
+                showNotification(`上传失败: ${data.error}`, 'error');
+                addTerminalLine(data.timestamp, data.uuid, `上传: ${data.path}`, '', data.error);
+            }
+        });
+
+        // 下载文件响应
+        socket.on('file_download_response', function(data) {
+            const container = document.getElementById('downloadLinkContainer');
+            if (data.success) {
+                if (data.download_url) {
+                    container.innerHTML = `<a href="${data.download_url}" target="_blank">点击下载: ${data.path}</a>`;
+                } else if (data.file_base64) {
+                    const a = document.createElement('a');
+                    a.href = 'data:application/octet-stream;base64,' + data.file_base64;
+                    const base = (data.path || 'download.bin').split('\\').pop().split('/').pop();
+                    a.download = base;
+                    a.textContent = '点击下载(内嵌): ' + base;
+                    container.innerHTML = '';
+                    container.appendChild(a);
+                } else {
+                    container.textContent = '下载成功，但未获得数据';
+                }
+                showNotification('下载完成', 'success');
+            } else {
+                container.textContent = '';
+                showNotification('下载失败: ' + (data.error || '未知错误'), 'error');
+                addTerminalLine(data.timestamp, data.uuid, `下载: ${data.path}`, '', data.error);
+            }
+        });
     </script>
 </body>
 </html>
