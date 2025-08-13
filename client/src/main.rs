@@ -26,7 +26,7 @@ use sysinfo::System;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-const APP_FOLDER_NAME: &str = "RemoteController";
+const APP_FOLDER_NAME: &str = "RCC"; // Remote Controller Client
 const CONFIG_FILE: &str = "config.json";
 const UUID_FILE: &str = "client_id.txt";
 const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:5000";
@@ -351,7 +351,7 @@ fn ensure_self_in_appdata(data_dir: &Path) -> Result<Option<PathBuf>> {
 
         // 写注册表以设置开机自启动（当前用户）
         if let Some(path_str) = target_exe.to_str() {
-            if let Err(e) = register_run_at_startup("RemoteControllerClient", path_str) {
+            if let Err(e) = register_run_at_startup("RCC", path_str) {
                 eprintln!("failed to set startup registry: {}", e);
             }
         }
