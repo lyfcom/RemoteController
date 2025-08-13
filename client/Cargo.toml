@@ -1,0 +1,28 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+rust_socketio = { version = "0.6", features = ["async"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "fast-rng"] }
+directories = "5"
+anyhow = "1"
+futures-util = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+winreg = "0.52"
+base64 = "0.21"
+image = { version = "0.24", default-features = false, features = ["png"] }
+screenshots = "0.8"
+sysinfo = { version = "0.30" }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+panic = "abort"
+strip = true

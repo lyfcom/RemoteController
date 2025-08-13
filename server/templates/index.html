@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>远程控制服务端 - 控制面板</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background 0.3s;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 2rem;
+        }
+        
+        .sidebar {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            padding: 1.5rem;
+            height: fit-content;
+        }
+        
+        .main-content {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            padding: 1.5rem;
+        }
+        
+        .section-title {
+            color: #333;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e1e5e9;
+        }
+        
+        .client-list {
+            margin-bottom: 2rem;
+        }
+        
+        .client-item {
+            background: #f8f9fa;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 8px;
+            border-left: 4px solid #28a745;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .client-item:hover {
+            background: #e9ecef;
+        }
+        
+        .client-item.selected {
+            background: #e3f2fd;
+            border-left-color: #2196f3;
+        }
+        
+        .client-item.offline {
+            border-left-color: #dc3545;
+            opacity: 0.7;
+        }
+        
+        .client-uuid {
+            font-weight: bold;
+            color: #333;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+        
+        .client-info {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 0.3rem;
+        }
+        
+        .control-section {
+            margin-bottom: 2rem;
+        }
+        
+        .command-input-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .command-input {
+            flex: 1;
+            padding: 0.75rem;
+            border: 2px solid #e1e5e9;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .command-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            font-size: 0.9rem;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-small {
+            padding: 0.5rem 1rem;
+            font-size: 0.8rem;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            transform: scale(1.2);
+        }
+        
+        .terminal {
+            background: #1e1e1e;
+            color: #fff;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            height: 400px;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+        }
+        
+        .terminal-line {
+            margin-bottom: 0.5rem;
+            word-wrap: break-word;
+        }
+        
+        .terminal-timestamp {
+            color: #888;
+        }
+        
+        .terminal-uuid {
+            color: #4fc3f7;
+            font-weight: bold;
+        }
+        
+        .terminal-command {
+            color: #81c784;
+        }
+        
+        .terminal-output {
+            color: #fff;
+            white-space: pre-wrap;
+        }
+        
+        .terminal-error {
+            color: #f48fb1;
+        }
+        
+        .file-operations {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .file-op-group {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #e1e5e9;
+        }
+        
+        .file-op-group h4 {
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+        
+        .file-path-input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            margin-bottom: 0.5rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+        
+        .status-online {
+            background: #28a745;
+        }
+        
+        .status-offline {
+            background: #dc3545;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 1rem;
+            border-radius: 5px;
+            color: white;
+            max-width: 300px;
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s;
+        }
+        
+        .notification.show {
+            transform: translateX(0);
+        }
+        
+        .notification.success {
+            background: #28a745;
+        }
+        
+        .notification.error {
+            background: #dc3545;
+        }
+        
+        .notification.info {
+            background: #17a2b8;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+            
+            .command-input-group {
+                flex-direction: column;
+            }
+            
+            .file-operations {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <h1>🖥️ 远程控制服务端</h1>
+            <a href="/logout" class="logout-btn">登出</a>
+        </div>
+    </header>
+    
+    <div class="container">
+        <aside class="sidebar">
+            <h3 class="section-title">连接的客户端</h3>
+            <div class="client-list" id="clientList"></div>
+            
+            <div class="control-section">
+                <h4>快捷操作</h4>
+                <button class="btn btn-small btn-secondary" onclick="refreshClients()">刷新客户端</button>
+                <button class="btn btn-small" style="margin-left:6px;" onclick="requestScreenshot()">截图</button>
+                <button class="btn btn-small btn-danger" style="margin-left:6px;" onclick="restartSelectedClient()">重启客户端</button>
+            </div>
+        </aside>
+        
+        <main class="main-content">
+            <h3 class="section-title">命令控制台</h3>
+            
+            <div class="control-section">
+                <div class="command-input-group">
+                    <input type="text" class="command-input" id="commandInput" 
+                           placeholder="输入命令... (例如: dir, ipconfig, systeminfo)" 
+                           disabled>
+                    <button class="btn" id="executeBtn" onclick="executeCommand()" disabled>执行</button>
+                </div>
+                
+                <div class="checkbox-group">
+                    <input type="checkbox" id="sharedContext" checked>
+                    <label for="sharedContext">使用共享上下文 (保持命令历史，如cd命令生效)</label>
+                </div>
+            </div>
+            
+            <div class="terminal" id="terminal">
+                <div class="terminal-line">
+                    <span class="terminal-timestamp">[等待连接]</span> 
+                    <span class="terminal-output">请先选择一个客户端，然后输入命令...</span>
+                </div>
+            </div>
+            
+            <h3 class="section-title">文件操作</h3>
+            <div class="file-operations">
+                <div class="file-op-group">
+                    <h4>📂 目录操作</h4>
+                    <input type="text" class="file-path-input" id="listDirPath" placeholder="目录路径 (例如: C:\)">
+                    <button class="btn btn-small" onclick="listDirectory()">列出目录</button>
+                </div>
+                
+                <div class="file-op-group">
+                    <h4>📄 读取文件</h4>
+                    <input type="text" class="file-path-input" id="readFilePath" placeholder="文件路径">
+                    <button class="btn btn-small" onclick="readFile()">读取文件</button>
+                </div>
+                
+                <div class="file-op-group">
+                    <h4>✏️ 写入文件</h4>
+                    <input type="text" class="file-path-input" id="writeFilePath" placeholder="文件路径">
+                    <textarea class="file-path-input" id="writeFileContent" placeholder="文件内容" rows="3"></textarea>
+                    <button class="btn btn-small" onclick="writeFile()">写入文件</button>
+                </div>
+                
+                <div class="file-op-group">
+                    <h4>🗑️ 删除文件</h4>
+                    <input type="text" class="file-path-input" id="deleteFilePath" placeholder="文件路径">
+                    <button class="btn btn-small btn-danger" onclick="deleteFile()">删除文件</button>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <div id="notification" class="notification"></div>
+    
+    <!-- 截图预览弹层 -->
+    <div id="screenshotModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:10px; border-radius:6px; max-width:90vw; max-height:90vh; overflow:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong>截图预览</strong>
+                <button class="btn btn-small btn-secondary" onclick="closeScreenshot()">关闭</button>
+            </div>
+            <img id="screenshotImage" src="" alt="screenshot" style="max-width:100%; height:auto;" />
+        </div>
+    </div>
+    
+    <script>
+        const socket = io();
+        let selectedClient = null;
+        let connectedClients = {};
+        
+        // 连接到服务器
+        socket.on('connect', function() {
+            console.log('Connected to server');
+            socket.emit('join_web_client');
+            showNotification('已连接到服务器', 'success');
+        });
+        
+        socket.on('disconnect', function() {
+            console.log('Disconnected from server');
+            showNotification('与服务器断开连接', 'error');
+        });
+        
+        // 接收客户端列表
+        socket.on('client_list', function(data) {
+            updateClientList(data.clients);
+        });
+        
+        socket.on('client_list_update', function(data) {
+            updateClientList(data.clients);
+        });
+        
+        // 接收命令响应：仅追加输出/错误，避免重复显示命令
+        socket.on('command_response', function(data) {
+            addTerminalLine(data.timestamp, data.uuid, '', data.output, data.error);
+        });
+        
+        // 接收文件操作响应
+        socket.on('file_operation_response', function(data) {
+            if (data.success) {
+                if (data.operation === 'list_dir') {
+                    let output = '目录内容:\\n';
+                    data.data.forEach(item => {
+                        output += `${item.is_dir ? '[DIR]' : '[FILE]'} ${item.name}\\n`;
+                    });
+                    addTerminalLine(data.timestamp, data.uuid, `文件操作: ${data.operation}`, output);
+                } else if (data.operation === 'read_file') {
+                    addTerminalLine(data.timestamp, data.uuid, `文件操作: ${data.operation}`, data.data.content || '文件内容为空');
+                } else {
+                    addTerminalLine(data.timestamp, data.uuid, `文件操作: ${data.operation}`, '操作成功');
+                }
+                showNotification(`文件操作成功: ${data.operation}`, 'success');
+            } else {
+                addTerminalLine(data.timestamp, data.uuid, `文件操作: ${data.operation}`, '', data.error);
+                showNotification(`文件操作失败: ${data.error}`, 'error');
+            }
+        });
+        
+        // 接收错误消息
+        socket.on('error', function(data) {
+            showNotification(data.message, 'error');
+        });
+        // 接收一般信息
+        socket.on('info', function(data) {
+            if (data && data.message) {
+                showNotification(data.message, 'info');
+            }
+        });
+        
+        // 接收命令发送确认
+        socket.on('command_sent', function(data) {
+            // 模拟真实控制台：先打印命令本身，不显示“命令已发送”提示
+            addTerminalLine(data.timestamp, data.target_uuid, data.command, '');
+        });
+        
+        // 更新客户端列表
+        function updateClientList(clients) {
+            const clientList = document.getElementById('clientList');
+            connectedClients = {};
+            clientList.innerHTML = '';
+            let count = 0;
+            clients.forEach(client => {
+                if (client.uuid) {
+                    connectedClients[client.uuid] = client;
+                    const clientItem = document.createElement('div');
+                    clientItem.className = `client-item ${selectedClient === client.uuid ? 'selected' : ''}`;
+                    clientItem.onclick = () => selectClient(client.uuid);
+                    clientItem.innerHTML = `
+                        <div class="client-uuid">
+                            <span class="status-indicator status-online"></span>
+                            ${client.uuid}
+                        </div>
+                        <div class="client-info">
+                            连接时间: ${client.connect_time}<br>
+                            IP: ${client.ip}
+                        </div>
+                    `;
+                    clientList.appendChild(clientItem);
+                    count++;
+                }
+            });
+            if (count === 0) {
+                clientList.innerHTML = `
+                    <div class="client-item offline">
+                        <div class="client-uuid">无客户端连接</div>
+                        <div class="client-info">等待客户端连接...</div>
+                    </div>
+                `;
+            }
+            
+            // 检查当前选中的客户端是否仍然在线
+            if (selectedClient && !connectedClients[selectedClient]) {
+                selectedClient = null;
+                updateUIState();
+            }
+        }
+        
+        // 选择客户端
+        function selectClient(uuid) {
+            selectedClient = uuid;
+            document.querySelectorAll('.client-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            event.target.closest('.client-item').classList.add('selected');
+            updateUIState();
+            showNotification(`已选择客户端: ${uuid}`, 'info');
+        }
+        
+        // 更新UI状态
+        function updateUIState() {
+            const commandInput = document.getElementById('commandInput');
+            const executeBtn = document.getElementById('executeBtn');
+            const hasSelectedClient = selectedClient !== null;
+            
+            commandInput.disabled = !hasSelectedClient;
+            executeBtn.disabled = !hasSelectedClient;
+            
+            if (hasSelectedClient) {
+                commandInput.placeholder = `输入命令发送到 ${selectedClient}...`;
+            } else {
+                commandInput.placeholder = '请先选择一个客户端...';
+            }
+        }
+        
+        // 执行命令
+        function executeCommand() {
+            const commandInput = document.getElementById('commandInput');
+            const command = commandInput.value.trim();
+            const useSharedContext = document.getElementById('sharedContext').checked;
+            
+            if (!command || !selectedClient) return;
+            
+            socket.emit('execute_command', {
+                target_uuid: selectedClient,
+                command: command,
+                use_shared_context: useSharedContext
+            });
+            
+            commandInput.value = '';
+        }
+        
+        // 命令输入框回车事件
+        document.getElementById('commandInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                executeCommand();
+            }
+        });
+        
+        // 添加终端输出行
+        function addTerminalLine(timestamp, uuid, command, output, error) {
+            const terminal = document.getElementById('terminal');
+            const line = document.createElement('div');
+            line.className = 'terminal-line';
+            
+            let content = `<span class=\"terminal-timestamp\">[${timestamp}]</span> <span class=\"terminal-uuid\">${uuid}</span>`;
+            
+            if (command) {
+                const safeCmd = (command || '').replace(/\\n/g, ' ');
+                content += ` <span class=\"terminal-command\">$ ${safeCmd}</span>`;
+            }
+            
+            if (output) {
+                const cleaned = output
+                  .replace(/__RC_END__:[^\n]*\n?/g, '')
+                  .replace(/\r/g, '')
+                  .replace(/(^|\n)PS [^\n>]*>/g, '')
+                  .trim();
+                if (cleaned) {
+                    content += `<div class=\"terminal-output\">${cleaned}</div>`;
+                }
+            }
+            
+            if (error) {
+                const cleanedErr = error
+                  .replace(/__RC_END__:[^\n]*\n?/g, '')
+                  .replace(/\r/g, '')
+                  .replace(/(^|\n)PS [^\n>]*>/g, '')
+                  .trim();
+                if (cleanedErr) {
+                    content += `<div class=\"terminal-error\">ERROR: ${cleanedErr}</div>`;
+                }
+            }
+            
+            line.innerHTML = content;
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+        
+        // 文件操作函数
+        function listDirectory() {
+            const path = document.getElementById('listDirPath').value.trim();
+            if (!selectedClient) {
+                showNotification('请先选择一个客户端', 'error');
+                return;
+            }
+            
+            socket.emit('file_operation', {
+                target_uuid: selectedClient,
+                operation: 'list_dir',
+                path: path || '.'
+            });
+        }
+        
+        function readFile() {
+            const path = document.getElementById('readFilePath').value.trim();
+            if (!selectedClient || !path) {
+                showNotification('请先选择客户端并输入文件路径', 'error');
+                return;
+            }
+            
+            socket.emit('file_operation', {
+                target_uuid: selectedClient,
+                operation: 'read_file',
+                path: path
+            });
+        }
+        
+        function writeFile() {
+            const path = document.getElementById('writeFilePath').value.trim();
+            const content = document.getElementById('writeFileContent').value;
+            if (!selectedClient || !path) {
+                showNotification('请先选择客户端并输入文件路径', 'error');
+                return;
+            }
+            
+            socket.emit('file_operation', {
+                target_uuid: selectedClient,
+                operation: 'write_file',
+                path: path,
+                file_data: content
+            });
+        }
+        
+        function deleteFile() {
+            const path = document.getElementById('deleteFilePath').value.trim();
+            if (!selectedClient || !path) {
+                showNotification('请先选择客户端并输入文件路径', 'error');
+                return;
+            }
+            
+            if (!confirm(`确定要删除文件: ${path} 吗？`)) {
+                return;
+            }
+            
+            socket.emit('file_operation', {
+                target_uuid: selectedClient,
+                operation: 'delete_file',
+                path: path
+            });
+        }
+        
+        // 刷新客户端列表
+        function refreshClients() {
+            socket.emit('join_web_client');
+        }
+        
+        // 显示通知
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type} show`;
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+        
+        // 初始化
+        updateUIState();
+
+        // 截图：接收响应并展示
+        socket.on('screenshot_response', function(data) {
+            if (!data.success) {
+                showNotification(`截图失败: ${data.error || '未知错误'}`, 'error');
+                return;
+            }
+            const imgEl = document.getElementById('screenshotImage');
+            imgEl.src = 'data:image/png;base64,' + data.image_base64;
+            document.getElementById('screenshotModal').style.display = 'flex';
+        });
+        
+        function requestScreenshot() {
+            if (!selectedClient) {
+                showNotification('请先选择一个客户端', 'error');
+                return;
+            }
+            const idxRaw = prompt('输入显示器索引（留空或0为主显示器）：', '0');
+            const display_index = idxRaw ? parseInt(idxRaw, 10) : 0;
+            socket.emit('screenshot', { target_uuid: selectedClient, display_index });
+            showNotification('已请求截图', 'info');
+        }
+        
+        function closeScreenshot() {
+            document.getElementById('screenshotModal').style.display = 'none';
+            document.getElementById('screenshotImage').src = '';
+        }
+
+        function restartSelectedClient() {
+            if (!selectedClient) {
+                showNotification('请先选择一个客户端', 'error');
+                return;
+            }
+            if (!confirm(`确定重启客户端 ${selectedClient} 吗？`)) return;
+            socket.emit('restart_client', { target_uuid: selectedClient });
+            showNotification('已请求客户端重启', 'info');
+        }
+    </script>
+</body>
+</html>

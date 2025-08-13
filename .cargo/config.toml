@@ -1,0 +1,8 @@
+[build]
+# 若已安装 GNU toolchain，可启用下行以静态链接 CRT（需本机满足链接器依赖）
+# target = "x86_64-pc-windows-gnu"
+
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+  "-C", "target-feature=+crt-static"
+]
