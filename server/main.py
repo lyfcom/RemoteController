@@ -336,6 +336,24 @@ def handle_restart_client(data):
     except Exception as e:
         logger.error(f'重启请求失败: {e}')
         emit('error', {'message': f'重启请求失败: {str(e)}'})
+@socketio.on('reset_context')
+def handle_reset_context(data):
+    """处理来自Web客户端的重置共享上下文请求"""
+    try:
+        target_uuid = data.get('target_uuid')
+        if not target_uuid:
+            emit('error', {'message': '缺少目标UUID'})
+            return
+        target_sid = client_uuid_mapping.get(target_uuid)
+        if not target_sid:
+            emit('error', {'message': f'客户端 {target_uuid} 未连接'})
+            return
+        logger.info(f'发送上下文重置到客户端 {target_uuid}')
+        socketio.emit('reset_context', {}, room=target_sid)
+        emit('info', {'message': f'已通知客户端 {target_uuid} 重置共享上下文'})
+    except Exception as e:
+        logger.error(f'上下文重置请求失败: {e}')
+        emit('error', {'message': f'上下文重置请求失败: {str(e)}'})
 @socketio.on('screenshot')
 def handle_screenshot(data):
     """处理来自Web客户端的截图请求"""

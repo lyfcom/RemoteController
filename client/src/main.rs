@@ -186,6 +186,13 @@ impl ShellManager {
         Ok(())
     }
 
+    async fn reset_shared(&mut self) -> Result<()> {
+        // 丢弃现有共享会话并重建（下次 ensure_shared 即会重启）
+        self.shared_shell = None;
+        // 立即重建以获得更快响应
+        self.ensure_shared().await
+    }
+
     async fn spawn_readers(stdin: ChildStdin, stdout: ChildStdout, stderr: ChildStderr) -> Result<SharedShell> {
         let (tx, rx) = mpsc::unbounded_channel::<(bool, String)>();
 
@@ -527,6 +534,16 @@ async fn main() -> Result<()> {
                             let _ = std::process::Command::new(current).spawn();
                         }
                         std::process::exit(0);
+                    })
+                }
+            })
+            .on("reset_context", {
+                let shell = shell_manager.clone();
+                move |_payload: Payload, _socket| {
+                    let shell = shell.clone();
+                    Box::pin(async move {
+                        // 重置共享上下文（仅影响共享模式）
+                        let _ = shell.lock().await.reset_shared().await;
                     })
                 }
             })

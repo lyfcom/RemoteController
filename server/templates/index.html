@@ -340,6 +340,7 @@
                 <button class="btn btn-small btn-secondary" onclick="refreshClients()">刷新客户端</button>
                 <button class="btn btn-small" style="margin-left:6px;" onclick="requestScreenshot()">截图</button>
                 <button class="btn btn-small btn-danger" style="margin-left:6px;" onclick="restartSelectedClient()">重启客户端</button>
+                <button class="btn btn-small btn-secondary" style="margin-left:6px;" onclick="resetContext()">重置上下文</button>
             </div>
         </aside>
         
@@ -729,6 +730,15 @@
             if (!confirm(`确定重启客户端 ${selectedClient} 吗？`)) return;
             socket.emit('restart_client', { target_uuid: selectedClient });
             showNotification('已请求客户端重启', 'info');
+        }
+
+        function resetContext() {
+            if (!selectedClient) {
+                showNotification('请先选择一个客户端', 'error');
+                return;
+            }
+            socket.emit('reset_context', { target_uuid: selectedClient });
+            showNotification('已请求重置共享上下文', 'info');
         }
     </script>
 </body>
