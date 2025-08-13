@@ -460,10 +460,12 @@
         socket.on('file_operation_response', function(data) {
             if (data.success) {
                 if (data.operation === 'list_dir') {
-                    let output = '目录内容:\\n';
+                    // 构造真实换行文本，不再保留字符串中的 "\\n"
+                    let lines = ['目录内容:'];
                     data.data.forEach(item => {
-                        output += `${item.is_dir ? '[DIR]' : '[FILE]'} ${item.name}\\n`;
+                        lines.push(`${item.is_dir ? '[DIR]' : '[FILE]'} ${item.name}`);
                     });
+                    const output = lines.join('\n');
                     addTerminalLine(data.timestamp, data.uuid, `文件操作: ${data.operation}`, output);
                 } else if (data.operation === 'read_file') {
                     addTerminalLine(data.timestamp, data.uuid, `文件操作: ${data.operation}`, data.data.content || '文件内容为空');
@@ -499,6 +501,12 @@
             const clientList = document.getElementById('clientList');
             connectedClients = {};
             clientList.innerHTML = '';
+            // 若当前未选择，尝试从本地存储恢复上次选择
+            if (!selectedClient) {
+                const saved = localStorage.getItem('lastSelectedUuid');
+                if (saved) { selectedClient = saved; }
+            }
+
             let count = 0;
             clients.forEach(client => {
                 if (client.uuid) {
@@ -534,11 +542,15 @@
                 selectedClient = null;
                 updateUIState();
             }
+
+            // 若成功恢复了选择，确保输入区可用
+            updateUIState();
         }
         
         // 选择客户端
         function selectClient(uuid) {
             selectedClient = uuid;
+            try { localStorage.setItem('lastSelectedUuid', uuid); } catch (_) {}
             document.querySelectorAll('.client-item').forEach(item => {
                 item.classList.remove('selected');
             });

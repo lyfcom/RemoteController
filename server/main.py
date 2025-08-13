@@ -19,7 +19,9 @@ socketio = SocketIO(
     cors_allowed_origins="*",  # 开发环境允许所有来源
     async_mode='eventlet',     # 指定使用eventlet异步模式
     logger=True,               # 启用日志
-    engineio_logger=True       # 启用引擎日志
+    engineio_logger=True,      # 启用引擎日志
+    ping_timeout=120,          # 适当放宽心跳超时，防止长时间操作导致误判
+    ping_interval=25           # 心跳间隔保持默认或适当
 )
 
 # 配置日志
@@ -83,16 +85,17 @@ def logout():
     return redirect(url_for('login'))
 
 def get_client_list():
-    """获取当前连接的客户端列表"""
+    """获取当前连接的客户端列表（按UUID去重，仅返回最新SID对应的客户端）"""
     clients = []
-    for sid, client_info in connected_clients.items():
-        # 仅返回已完成UUID注册的客户端，避免在Web端显示为null
-        if client_info.get('uuid'):
-            clients.append({
-                'uuid': client_info['uuid'],
-                'connect_time': client_info['connect_time'].strftime('%Y-%m-%d %H:%M:%S'),
-                'ip': client_info.get('ip', 'Unknown')
-            })
+    for uuid, sid in client_uuid_mapping.items():
+        info = connected_clients.get(sid)
+        if not info:
+            continue
+        clients.append({
+            'uuid': uuid,
+            'connect_time': info['connect_time'].strftime('%Y-%m-%d %H:%M:%S'),
+            'ip': info.get('ip', 'Unknown')
+        })
     return clients
 
 # ============ WebSocket 事件处理器 ============
@@ -116,6 +119,17 @@ def handle_connect(auth):
         'type': 'agent'  # 默认标记为代理客户端，Web端会在join_web_client中覆盖
     }
     if client_uuid:
+        # 若已有旧 SID，移除旧记录并断开旧连接，确保不会在前端出现重复客户端
+        old_sid = client_uuid_mapping.get(client_uuid)
+        if old_sid and old_sid != request.sid:
+            try:
+                if old_sid in connected_clients:
+                    del connected_clients[old_sid]
+                # 主动断开旧SID（若仍存活）
+                disconnect(old_sid)
+            except Exception as e:
+                logger.error(f'清理旧连接失败: {e}')
+        # 覆盖为最新 SID
         client_uuid_mapping[client_uuid] = request.sid
         logger.info(f'客户端注册(握手auth): {client_uuid} (SID: {request.sid})')
         emit_client_list_update()
@@ -129,8 +143,10 @@ def handle_disconnect():
     if request.sid in connected_clients:
         client_info = connected_clients[request.sid]
         if client_info['uuid']:
-            # 从UUID映射中移除
-            client_uuid_mapping.pop(client_info['uuid'], None)
+            # 仅当映射仍指向本次断开的 SID 时才移除，避免覆盖新连接
+            current_sid = client_uuid_mapping.get(client_info['uuid'])
+            if current_sid == request.sid:
+                client_uuid_mapping.pop(client_info['uuid'], None)
         del connected_clients[request.sid]
     
     # 通知所有Web客户端更新客户端列表

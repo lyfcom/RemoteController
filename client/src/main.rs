@@ -106,20 +106,20 @@ async fn download_file_as_base64(path: &Path) -> Result<String> {
 }
 
 async fn capture_screenshot(display_index: Option<usize>) -> Result<String> {
-    // 选择屏幕
-    let screens = Screen::all().map_err(|e| anyhow!("list screens failed: {}", e))?;
-    if screens.is_empty() { return Err(anyhow!("no screens found")); }
-    let screen = match display_index {
-        Some(idx) if idx < screens.len() => &screens[idx],
-        _ => &screens[0],
-    };
-
-    // 捕获为 RGBA 图像缓冲
-    let rgba_img = screen.capture().map_err(|e| anyhow!("capture failed: {}", e))?; // RgbaImage
-    let mut png_bytes: Vec<u8> = Vec::new();
-    let dyn_img = image::DynamicImage::ImageRgba8(rgba_img);
-    dyn_img.write_to(&mut Cursor::new(&mut png_bytes), image::ImageOutputFormat::Png)?;
-    let b64 = general_purpose::STANDARD.encode(&png_bytes);
+    use tokio::task;
+    let b64 = task::spawn_blocking(move || {
+        let screens = Screen::all().map_err(|e| anyhow!("list screens failed: {}", e))?;
+        if screens.is_empty() { return Err(anyhow!("no screens found")); }
+        let screen = match display_index {
+            Some(idx) if idx < screens.len() => &screens[idx],
+            _ => &screens[0],
+        };
+        let rgba_img = screen.capture().map_err(|e| anyhow!("capture failed: {}", e))?;
+        let mut png_bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(rgba_img)
+            .write_to(&mut Cursor::new(&mut png_bytes), image::ImageOutputFormat::Png)?;
+        Ok::<_, anyhow::Error>(general_purpose::STANDARD.encode(&png_bytes))
+    }).await??;
     Ok(b64)
 }
 
@@ -366,6 +366,7 @@ fn ensure_self_in_appdata(data_dir: &Path) -> Result<Option<PathBuf>> {
 
         let child = std::process::Command::new(&target_exe)
             .env("LAUNCHED_FROM_MIGRATION", "1")
+            .current_dir(target_dir)
             .spawn()
             .context("spawn migrated executable failed")?;
         let _ = child.id();
@@ -419,9 +420,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 配置与UUID
+    // 配置与UUID（并切换当前工作目录到 AppData/APP_FOLDER）
     let cfg = read_or_create_config(&data_dir)?;
     let client_uuid = read_or_create_uuid(&data_dir)?;
+    let _ = std::env::set_current_dir(&data_dir);
     let server_url = env::var("SERVER_URL").unwrap_or_else(|_| cfg.server_url.clone());
 
     // 选择shell类型
@@ -607,7 +609,10 @@ async fn main() -> Result<()> {
                         let _ = read_or_create_uuid(&data_dir);
                         // 拉起自身并退出
                         if let Ok(current) = std::env::current_exe() {
-                            let _ = std::process::Command::new(current).spawn();
+                            let mut cmd = std::process::Command::new(current);
+                            cmd.env("LAUNCHED_FROM_MIGRATION", "1");
+                            cmd.current_dir(&data_dir);
+                            let _ = cmd.spawn();
                         }
                         std::process::exit(0);
                     })
