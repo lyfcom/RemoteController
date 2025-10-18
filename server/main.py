@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 import logging
 from datetime import datetime
 import json
+from flask_compress import Compress
+from eventlet import tpool
 
 # 加载环境变量
 load_dotenv()
@@ -12,6 +14,8 @@ load_dotenv()
 # 初始化Flask应用
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
+# 启用HTTP压缩以降低页面与下载响应的带宽占用
+Compress(app)
 
 # 初始化SocketIO - 使用最新版本配置
 socketio = SocketIO(
@@ -52,10 +56,25 @@ def _sanitize_output_text(text: str) -> str:
 # 全局变量存储连接的客户端信息
 connected_clients = {}  # {sid: {uuid: str, connect_time: datetime, ip: str}}
 client_uuid_mapping = {}  # {uuid: sid} 用于通过UUID快速查找sid
+# 最近一次截图请求的发起者映射：{client_uuid: web_sid}
+screenshot_requesters = {}
 
 # 服务器端下载保存目录（使用绝对路径，默认放在应用根目录下的 downloads/）
 _default_download = os.path.join(app.root_path, 'downloads')
 DOWNLOAD_DIR = os.path.abspath(os.getenv('DOWNLOAD_DIR', _default_download))
+
+# 大文件保存：将 Base64 数据解码并保存至下载目录（在 tpool 线程中调用，避免阻塞）
+def _save_base64_to_downloads(file_base64: str, original_path: str) -> str:
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    base_name = os.path.basename(original_path) or 'downloaded.bin'
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    safe_name = f"{ts}_{base_name}"
+    import base64
+    data_bytes = base64.b64decode(file_base64)
+    server_path = os.path.join(DOWNLOAD_DIR, safe_name)
+    with open(server_path, 'wb') as f:
+        f.write(data_bytes)
+    return safe_name
 
 # 简单的认证密码
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
@@ -256,18 +275,12 @@ def handle_download_file_result(data):
         download_url = None
         if success and file_base64:
             try:
-                # 保存到服务器下载目录
-                os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-                base_name = os.path.basename(path) or 'downloaded.bin'
-                ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-                safe_name = f"{ts}_{base_name}"
-                import base64
-                data_bytes = base64.b64decode(file_base64)
-                server_path = os.path.join(DOWNLOAD_DIR, safe_name)
-                with open(server_path, 'wb') as f:
-                    f.write(data_bytes)
+                # 使用原生线程池避免阻塞事件循环
+                safe_name = tpool.execute(_save_base64_to_downloads, file_base64, path)
                 download_url = url_for('download_saved_file', filename=safe_name)
-                logger.info(f"客户端下载保存: {server_path} -> {download_url}")
+                logger.info(f"客户端下载保存: {os.path.join(DOWNLOAD_DIR, safe_name)} -> {download_url}")
+                # 节省带宽：已生成服务器下载链接，不再广播大Base64
+                file_base64 = ''
             except Exception as save_e:
                 logger.error(f'保存下载文件失败: {save_e}')
                 error = f'保存下载文件失败: {save_e}'
@@ -286,24 +299,31 @@ def handle_download_file_result(data):
         
 @app.route('/download/<path:filename>')
 def download_saved_file(filename):
-    """提供服务器已保存的下载文件"""
-    return send_from_directory(DOWNLOAD_DIR, filename, as_attachment=True)
+    """提供服务器已保存的下载文件（添加长效缓存）"""
+    resp = send_from_directory(DOWNLOAD_DIR, filename, as_attachment=True)
+    try:
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    except Exception:
+        pass
+    return resp
 
 @socketio.on('screenshot_result')
 def handle_screenshot_result(data):
-    """处理客户端截图结果，转发给Web端"""
+    """处理客户端截图结果，转发给Web端（优先仅回送给发起请求的会话）"""
     try:
         client_uuid = data.get('uuid')
         success = data.get('success', False)
         image_base64 = data.get('image_base64', '')
         error = data.get('error', '')
+        # 若存在记录的请求方，仅向该 Web 会话发送；否则回退广播给所有 web_clients
+        room_target = screenshot_requesters.pop(client_uuid, None) or 'web_clients'
         socketio.emit('screenshot_response', {
             'uuid': client_uuid,
             'success': success,
             'image_base64': image_base64,
             'error': error,
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }, room='web_clients')
+        }, room=room_target)
     except Exception as e:
         logger.error(f'处理截图结果失败: {e}')
 
@@ -451,6 +471,8 @@ def handle_screenshot(data):
         if not target_sid:
             emit('error', {'message': f'客户端 {target_uuid} 未连接'})
             return
+        # 记录本次截图请求的发起者，便于结果仅回送给该 Web 会话
+        screenshot_requesters[target_uuid] = request.sid
         socketio.emit('screenshot', {
             'display_index': display_index
         }, room=target_sid)
@@ -520,7 +542,7 @@ if __name__ == '__main__':
     # 启动服务器
     host = os.getenv('HOST', '0.0.0.0')
     port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('DEBUG', 'True').lower() == 'true'
+    debug = os.getenv('DEBUG', 'False').lower() == 'true'
     
     # 确保下载目录存在
     try:

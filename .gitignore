@@ -1,1 +1,32 @@
+# Project ignores
+
+# Top-level downloads (legacy)
 downloads/
+
+# Server downloads directory
+server/downloads/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+server/.venv/
+server/venv/
+server/__pycache__/
+
+# Environment files
+.env
+server/.env
+
+# Rust build output
+client/target/
+**/target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
