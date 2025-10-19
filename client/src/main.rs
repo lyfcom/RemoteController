@@ -130,7 +130,8 @@ async fn capture_screenshot(display_index: Option<usize>) -> Result<String> {
             let scale = max_edge as f32 / max_dimension as f32;
             let new_w = (w as f32 * scale).round() as u32;
             let new_h = (h as f32 * scale).round() as u32;
-            dyn_img = dyn_img.resize_exact(new_w, new_h, FilterType::Lanczos3);
+            // 使用较快的缩放算法以提升性能
+            dyn_img = dyn_img.resize_exact(new_w, new_h, FilterType::Triangle);
         }
         
         let mut png_bytes = Vec::new();
